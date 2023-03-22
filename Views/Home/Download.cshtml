@@ -1,0 +1,5 @@
+﻿@model CalendarOutputModel
+
+<a href="data:application/octet-stream;base64,@(Convert.ToBase64String(Model.FileContent))" download="@Model.FileName">
+    Download @Model.FileName
+</a>
