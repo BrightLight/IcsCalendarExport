@@ -6,6 +6,9 @@ using Ical.Net;
 using System.Net.Http;
 using System.IO;
 using Microsoft.Extensions.Options;
+using SkiaSharp;
+using Svg.Skia;
+using System.Diagnostics.CodeAnalysis;
 
 namespace IcsCalendar2Excel.Controllers
 {
@@ -101,13 +104,66 @@ namespace IcsCalendar2Excel.Controllers
                 {
                     // Download the logo image
                     var logoData = await DownloadImageAsync(url);
-                    using var stream = new MemoryStream(logoData);
+                    using (Stream stream = new MemoryStream(logoData))
+                    {
+                        // check if the logo is an SVG file and convert it to PNG if needed
+                        // ClosedXML does not support SVG images, so we need to convert them to PNG
+                        Stream? logoStream = stream;
+                        if (url.EndsWith(".svg", StringComparison.OrdinalIgnoreCase))
+                        {
+                            if (!TrySvnToPng(stream, out var pngStream))
+                            {
+                                return;
+                            }
 
-                    // Add the logo to the top right of the worksheet
-                    var logo = ws.AddPicture(stream)
-                                  .MoveTo(ws.Cell("G1"))
-                                  .Scale(0.5); // Adjust the scale as needed
+                            logoStream = pngStream;
+                        }
+
+                        try
+                        {
+                            var logoCell = ws.Cell("G1");
+                            var logoCellWidth = GetWidthInPixels(logoCell.WorksheetColumn());
+                            // Add the logo to the top right of the worksheet
+                            var logo = ws.AddPicture(logoStream)
+                                          .MoveTo(logoCell);
+                            logo.WithSize(logoCellWidth, Convert.ToInt32(((decimal)logoCellWidth / logo.OriginalWidth) * logo.OriginalHeight));
+                            ////logo.Scale(1); // Adjust the scale as needed
+                        }
+                        catch (Exception)
+                        {
+                            // no logo because something went wrong
+                        }
+                    }
                 }
+            }
+
+            bool TrySvnToPng(Stream svnStream, [NotNullWhen(true)]out Stream pngStream)
+            {
+                using (var svg = new SKSvg())
+                {
+                    if (svg.Load(svnStream) is { })
+                    {
+                        pngStream = new MemoryStream();
+                        svg.Save(pngStream, SKColor.Empty, SKEncodedImageFormat.Png);
+                        pngStream.Position = 0;
+                        return true;
+                    }
+
+                    pngStream = Stream.Null;
+                    return false;
+                }
+            }
+
+            // https://github.com/ClosedXML/ClosedXML/issues/846
+            static int GetWidthInPixels(IXLColumn column)
+            {
+                var width = column.Width;
+                return width switch
+                {
+                    < 0 => throw new ArgumentOutOfRangeException(nameof(column), "Column Width cannot have a negative number"),
+                    < 1 => (int)Math.Round(width * 12, 0, MidpointRounding.AwayFromZero),
+                    _ => 5 + (int)Math.Round(width * 7, 0, MidpointRounding.AwayFromZero)
+                };
             }
 
             async Task FillWorksheetAsync(IXLWorksheet ws, int startMonth, int endMonth, string? url)
