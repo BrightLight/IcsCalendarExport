@@ -3,8 +3,15 @@
     // Models/CalendarOutputModel.cs
     public class CalendarOutputModel
     {
-        public string FileName { get; set; }
-        public byte[] FileContent { get; set; }
+        /// <summary>
+        /// Gets or sets the name of the file to download.
+        /// </summary>
+        public required string FileName { get; init; }
+        
+        /// <summary>
+        /// Gets or sets the content of the file to download.
+        /// </summary>
+        public required byte[] FileContent { get; init; }
     }
 
 }

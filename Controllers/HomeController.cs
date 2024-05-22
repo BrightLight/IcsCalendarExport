@@ -58,7 +58,7 @@ namespace IcsCalendar2Excel.Controllers
                 calendars.Add(calendar);
             }
 
-            var excelFile = GenerateExcelFile(input.Year, calendars);
+            var excelFile = await GenerateExcelFile(input.Year, calendars, input.LogoUrl);
             var output = new CalendarOutputModel
             {
                 FileName = $"Calendar_{input.Year}.xlsx",
@@ -68,99 +68,63 @@ namespace IcsCalendar2Excel.Controllers
             return View("Download", output);
         }
 
-        // 1. Try
-        ////private byte[] GenerateExcelFile(int year, List<Calendar> calendars)
-        ////{
-        ////    using var workbook = new XLWorkbook();
-        ////    var ws = workbook.AddWorksheet($"{year} Calendar");
-
-        ////    // Add your logic to populate the worksheet with the calendar and ICS data.
-
-        ////    using var ms = new MemoryStream();
-        ////    workbook.SaveAs(ms);
-        ////    return ms.ToArray();
-        ////}
-
-        //// 2. try
-        ////private byte[] GenerateExcelFile(int year, List<Calendar> calendars)
-        ////{
-        ////    using var workbook = new XLWorkbook();
-        ////    var ws = workbook.AddWorksheet($"{year} Calendar");
-
-        ////    int startRow = 1;
-        ////    int currentRow = startRow;
-        ////    int currentColumn = 1;
-
-        ////    for (int halfYear = 1; halfYear <= 2; halfYear++)
-        ////    {
-        ////        for (int month = 1; month <= 6; month++)
-        ////        {
-        ////            int globalMonth = (halfYear - 1) * 6 + month;
-        ////            var firstDayOfMonth = new DateTime(year, globalMonth, 1);
-        ////            int daysInMonth = DateTime.DaysInMonth(year, globalMonth);
-
-        ////            ws.Cell(currentRow, currentColumn).Value = firstDayOfMonth.ToString("MMMM");
-        ////            ws.Cell(currentRow, currentColumn).Style.Font.Bold = true;
-        ////            ws.Range(currentRow, currentColumn, currentRow, currentColumn + 1).Merge();
-
-        ////            currentRow++;
-
-        ////            for (int day = 1; day <= daysInMonth; day++)
-        ////            {
-        ////                var date = new DateTime(year, globalMonth, day);
-        ////                string dayOfWeek = date.ToString("ddd");
-        ////                bool isWeekend = date.DayOfWeek == DayOfWeek.Saturday || date.DayOfWeek == DayOfWeek.Sunday;
-
-        ////                var eventText = GetEventText(calendars, date);
-
-        ////                ws.Cell(currentRow, currentColumn).Value = day;
-        ////                ws.Cell(currentRow, currentColumn + 1).Value = string.IsNullOrWhiteSpace(eventText) ? dayOfWeek : eventText;
-
-        ////                if (isWeekend)
-        ////                {
-        ////                    ws.Cell(currentRow, currentColumn).Style.Fill.BackgroundColor = XLColor.LightGray;
-        ////                    ws.Cell(currentRow, currentColumn + 1).Style.Fill.BackgroundColor = XLColor.LightGray;
-        ////                }
-
-        ////                currentRow++;
-        ////            }
-
-        ////            currentRow = startRow;
-        ////            currentColumn += 2;
-        ////        }
-
-        ////        startRow += 31 + 1;
-        ////        currentRow = startRow;
-        ////        currentColumn = 1;
-        ////    }
-
-        ////    ws.Columns().AdjustToContents();
-
-        ////    using var ms = new MemoryStream();
-        ////    workbook.SaveAs(ms);
-        ////    return ms.ToArray();
-        ////}
-
-
-        // 3. try
-        private byte[] GenerateExcelFile(int year, List<Calendar> calendars)
+        private async Task<byte[]> GenerateExcelFile(int year, List<Calendar> calendars, string? logoUrl = null)
         {
             using var workbook = new XLWorkbook();
-            var ws = workbook.AddWorksheet($"{year} Calendar");
+            var wsFirstHalf = workbook.AddWorksheet($"{year} Calendar - H1");
+            var wsSecondHalf = workbook.AddWorksheet($"{year} Calendar - H2");
 
-            int startRow = 1;
-            int currentRow = startRow;
-            int currentColumn = 1;
             int dayColumnWidth = 5;
             int eventColumnWidth = 25;
+            double dayRowHeight = 22; // Default row height
+            double headerRowHeight = 50; // Specific row height for headernt dayRowHeight = 22;
+            double eventFontSize = 12; // Default font size
 
-            for (int halfYear = 1; halfYear <= 2; halfYear++)
+            async Task<byte[]> DownloadImageAsync(string url)
             {
-                for (int month = 1; month <= 6; month++)
+                using var httpClient = new HttpClient();
+                return await httpClient.GetByteArrayAsync(url);
+            }
+
+            async Task AddHeaderAsync(IXLWorksheet ws, string? url)
+            {
+                // Merge cells for the header text
+                ws.Range("A1:D1").Merge().Value = $"Kalender {year}";
+                ws.Range("A1:D1").Style.Font.Bold = true;
+                ws.Range("A1:D1").Style.Font.FontSize = 30;
+                ws.Range("A1:D1").Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Left;
+
+                // Set the height for the header row
+                ws.Row(1).Height = headerRowHeight;
+                
+                if (!string.IsNullOrWhiteSpace(url))
                 {
-                    int globalMonth = (halfYear - 1) * 6 + month;
-                    var firstDayOfMonth = new DateTime(year, globalMonth, 1);
-                    int daysInMonth = DateTime.DaysInMonth(year, globalMonth);
+                    // Download the logo image
+                    var logoData = await DownloadImageAsync(url);
+                    using var stream = new MemoryStream(logoData);
+
+                    // Add the logo to the top right of the worksheet
+                    var logo = ws.AddPicture(stream)
+                                  .MoveTo(ws.Cell("G1"))
+                                  .Scale(0.5); // Adjust the scale as needed
+                }
+            }
+
+            async Task FillWorksheetAsync(IXLWorksheet ws, int startMonth, int endMonth, string? url)
+            {
+                await AddHeaderAsync(ws, url);
+
+                // Set the default row height for the worksheet
+                ws.RowHeight = dayRowHeight;
+
+                int startRow = 2; // Adjust startRow to leave space for the header
+                int currentRow = startRow;
+                int currentColumn = 1;
+
+                for (int month = startMonth; month <= endMonth; month++)
+                {
+                    var firstDayOfMonth = new DateTime(year, month, 1);
+                    int daysInMonth = DateTime.DaysInMonth(year, month);
 
                     ws.Cell(currentRow, currentColumn).Value = firstDayOfMonth.ToString("MMMM");
                     ws.Cell(currentRow, currentColumn).Style.Font.Bold = true;
@@ -170,7 +134,7 @@ namespace IcsCalendar2Excel.Controllers
 
                     for (int day = 1; day <= daysInMonth; day++)
                     {
-                        var date = new DateTime(year, globalMonth, day);
+                        var date = new DateTime(year, month, day);
                         string dayOfWeek = date.ToString("ddd");
                         bool isWeekend = date.DayOfWeek == DayOfWeek.Saturday || date.DayOfWeek == DayOfWeek.Sunday;
 
@@ -185,6 +149,13 @@ namespace IcsCalendar2Excel.Controllers
                             ws.Cell(currentRow, currentColumn + 1).Style.Fill.BackgroundColor = XLColor.LightGray;
                         }
 
+                        // Set the font size for the day and event text
+                        ws.Cell(currentRow, currentColumn).Style.Font.FontSize = eventFontSize;
+                        ws.Cell(currentRow, currentColumn + 1).Style.Font.FontSize = eventFontSize;
+
+                        // Set the row height for each day row
+                        ws.Row(currentRow).Height = dayRowHeight;
+
                         currentRow++;
                     }
 
@@ -194,35 +165,65 @@ namespace IcsCalendar2Excel.Controllers
                     currentRow = startRow;
                     currentColumn += 2;
                 }
-
-                startRow += 31 + 1;
-                currentRow = startRow;
-                currentColumn = 1;
             }
 
-            // Set print area and page setup options
-            var printArea = ws.RangeUsed();
-            ws.NamedRanges.Add("CustomPrintArea", printArea);
-            ws.PageSetup.PrintAreas.Clear();
-            ws.PageSetup.PrintAreas.Add("CustomPrintArea");
-            ws.PageSetup.PaperSize = XLPaperSize.A4Paper;
-            ws.PageSetup.PageOrientation = XLPageOrientation.Landscape;
-            ws.PageSetup.FitToPages(1, 2); // Fit to 1 page wide and 2 pages tall
+            // Fill the first worksheet with the first half of the year
+            await FillWorksheetAsync(wsFirstHalf, 1, 6, logoUrl);
+
+            // Fill the second worksheet with the second half of the year
+            await FillWorksheetAsync(wsSecondHalf, 7, 12, logoUrl);
+
+            // Set print area and page setup options for the first half
+            var printAreaFirstHalf = wsFirstHalf.RangeUsed();
+            wsFirstHalf.NamedRanges.Add("CustomPrintAreaH1", printAreaFirstHalf);
+            wsFirstHalf.PageSetup.PrintAreas.Clear();
+            wsFirstHalf.PageSetup.PrintAreas.Add("CustomPrintAreaH1");
+            wsFirstHalf.PageSetup.PaperSize = XLPaperSize.A4Paper;
+            wsFirstHalf.PageSetup.PageOrientation = XLPageOrientation.Landscape;
+            wsFirstHalf.PageSetup.FitToPages(1, 2); // Fit to 1 page wide and 2 pages tall
+
+            // Set print area and page setup options for the second half
+            var printAreaSecondHalf = wsSecondHalf.RangeUsed();
+            wsSecondHalf.NamedRanges.Add("CustomPrintAreaH2", printAreaSecondHalf);
+            wsSecondHalf.PageSetup.PrintAreas.Clear();
+            wsSecondHalf.PageSetup.PrintAreas.Add("CustomPrintAreaH2");
+            wsSecondHalf.PageSetup.PaperSize = XLPaperSize.A4Paper;
+            wsSecondHalf.PageSetup.PageOrientation = XLPageOrientation.Landscape;
+            wsSecondHalf.PageSetup.FitToPages(1, 2); // Fit to 1 page wide and 2 pages tall
 
             using var ms = new MemoryStream();
             workbook.SaveAs(ms);
             return ms.ToArray();
         }
 
-        private string GetEventText(List<Calendar> calendars, DateTime date)
+        private string? GetEventText(List<Calendar> calendars, DateTime date)
         {
+            // Define your local time zone. For example, using Central European Time (CET)
+            TimeZoneInfo localTimeZone = TimeZoneInfo.FindSystemTimeZoneById("Central European Standard Time");
+
             foreach (var calendar in calendars)
             {
                 foreach (var e in calendar.Events)
                 {
-                    if (e.Start.Date == date.Date)
+                    DateTime localStartTime;
+                    // Convert the event start time from UTC to the local time zone
+                    if (e.Start.IsUtc)
                     {
-                        string startTime = e.Start.Value.TimeOfDay != TimeSpan.Zero ? e.Start.Value.ToString("HH:mm") : "";
+                        // Ensure the event start time is treated as UTC
+                        DateTime utcStartTime = DateTime.SpecifyKind(e.Start.Value, DateTimeKind.Utc);
+
+                        // Convert the event start time from UTC to the local time zone
+                        localStartTime = TimeZoneInfo.ConvertTimeFromUtc(utcStartTime, localTimeZone);
+                    }
+                    else
+                    {
+                        // If the event start time is already in the local time zone, use it directly
+                        localStartTime = e.Start.Value;
+                    }
+
+                    if (localStartTime.Date == date.Date)
+                    {
+                        string startTime = localStartTime.TimeOfDay != TimeSpan.Zero ? localStartTime.ToString("HH:mm") : "";
                         string eventName = e.Summary;
 
                         foreach (var replacement in _calendarSettings.Value.EventNameReplacements)
@@ -234,6 +235,7 @@ namespace IcsCalendar2Excel.Controllers
                     }
                 }
             }
+
             return null;
         }
     }
